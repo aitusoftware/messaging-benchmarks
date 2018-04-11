@@ -78,6 +78,8 @@ public class CompareAndSwapBenchmark {
         atomic.set(values[0]);
         LONG_ARRAY_VIEW
           .compareAndExchange(nativeBuffer, 0, 0, values[0]);
+        LONG_ARRAY_VIEW
+          .compareAndExchange(heapBuffer, 0, 0, values[0]);
         agronaBuffer.getAndSetLong(0, values[0]);
         counter = 1;
     }
@@ -101,6 +103,20 @@ public class CompareAndSwapBenchmark {
         long previousValue = values[(counter -1) & valuesMask];
         final long witness = (long) LONG_ARRAY_VIEW
           .compareAndExchange(nativeBuffer, 0, previousValue, nextValue);
+        if(witness != previousValue) {
+            throw new IllegalStateException("Counter: " + counter + ", next: " + nextValue +
+              ", previous: " + previousValue + ", witness: " + witness);
+        }
+        counter++;
+        return witness;
+    }
+
+    @Benchmark
+    public long casLongHeapByteBuffer() {
+        long nextValue = values[counter & valuesMask];
+        long previousValue = values[(counter -1) & valuesMask];
+        final long witness = (long) LONG_ARRAY_VIEW
+          .compareAndExchange(heapBuffer, 0, previousValue, nextValue);
         if(witness != previousValue) {
             throw new IllegalStateException("Counter: " + counter + ", next: " + nextValue +
               ", previous: " + previousValue + ", witness: " + witness);
