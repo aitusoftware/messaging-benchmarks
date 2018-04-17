@@ -31,14 +31,6 @@
 
 package com.aitusoftware.messaging;
 
-import java.lang.invoke.MethodHandles;
-import java.lang.invoke.VarHandle;
-import java.lang.reflect.Field;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicLong;
-
 import org.agrona.concurrent.UnsafeBuffer;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
@@ -52,7 +44,12 @@ import org.openjdk.jmh.annotations.Setup;
 import org.openjdk.jmh.annotations.State;
 import org.openjdk.jmh.annotations.Warmup;
 
-import sun.misc.Unsafe;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.VarHandle;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
 @State(Scope.Benchmark)
 @Measurement(iterations = 10)
@@ -60,94 +57,106 @@ import sun.misc.Unsafe;
 @OutputTimeUnit(TimeUnit.NANOSECONDS)
 @BenchmarkMode(Mode.AverageTime)
 @Fork(1)
-public class CompareAndSwapBenchmark {
+public class LongByteArrayCompareAndSwapBenchmark
+{
     private static final VarHandle LONG_ARRAY_VIEW =
-      MethodHandles.byteBufferViewVarHandle(long[].class, ByteOrder.nativeOrder());
+            MethodHandles.byteBufferViewVarHandle(long[].class, ByteOrder.nativeOrder());
 
-    private static final Unsafe UNSAFE = getUnsafe();
     private final AtomicLong atomic = new AtomicLong();
     private final ByteBuffer heapBuffer = ByteBuffer.allocate(8192).alignedSlice(8);
     private final ByteBuffer nativeBuffer = ByteBuffer.allocateDirect(8192).alignedSlice(8);
-    private final long[] values = new long[] {0, 1, 2, 3, 4, 5, 6, 7};
+    private final long[] values = new long[]{0, 1, 2, 3, 4, 5, 6, 7};
     private final int valuesMask = values.length - 1;
     private final UnsafeBuffer agronaBuffer = new UnsafeBuffer(ByteBuffer.allocateDirect(4096));
     private int counter;
 
     @Setup(Level.Trial)
-    public void setup() {
+    public void setup()
+    {
         atomic.set(values[0]);
         LONG_ARRAY_VIEW
-          .compareAndExchange(nativeBuffer, 0, 0, values[0]);
+                .compareAndExchange(nativeBuffer, 0, 0, values[0]);
         LONG_ARRAY_VIEW
-          .compareAndExchange(heapBuffer, 0, 0, values[0]);
+                .compareAndExchange(heapBuffer, 0, 0, values[0]);
         agronaBuffer.getAndSetLong(0, values[0]);
         counter = 1;
     }
 
     @Benchmark
-    public long casLongAtomic() {
+    public long casLongAtomic()
+    {
         long nextValue = values[counter & valuesMask];
-        long previousValue = values[(counter -1) & valuesMask];
+        long previousValue = values[(counter - 1) & valuesMask];
         final long witness = atomic.compareAndExchange(previousValue, nextValue);
-        if(witness != previousValue) {
+        if (witness != previousValue)
+        {
             throw new IllegalStateException("Counter: " + counter + ", next: " + nextValue +
-              ", previous: " + previousValue + ", witness: " + witness);
+                    ", previous: " + previousValue + ", witness: " + witness);
         }
         counter++;
         return witness;
     }
 
     @Benchmark
-    public long casLongNativeByteBuffer() {
+    public long casLongNativeByteBuffer()
+    {
         long nextValue = values[counter & valuesMask];
-        long previousValue = values[(counter -1) & valuesMask];
+        long previousValue = values[(counter - 1) & valuesMask];
         final long witness = (long) LONG_ARRAY_VIEW
-          .compareAndExchange(nativeBuffer, 0, previousValue, nextValue);
-        if(witness != previousValue) {
+                .compareAndExchange(nativeBuffer, 0, previousValue, nextValue);
+        if (witness != previousValue)
+        {
             throw new IllegalStateException("Counter: " + counter + ", next: " + nextValue +
-              ", previous: " + previousValue + ", witness: " + witness);
+                    ", previous: " + previousValue + ", witness: " + witness);
         }
         counter++;
         return witness;
     }
 
     @Benchmark
-    public long casLongHeapByteBuffer() {
+    public long casLongHeapByteBuffer()
+    {
         long nextValue = values[counter & valuesMask];
-        long previousValue = values[(counter -1) & valuesMask];
+        long previousValue = values[(counter - 1) & valuesMask];
         final long witness = (long) LONG_ARRAY_VIEW
-          .compareAndExchange(heapBuffer, 0, previousValue, nextValue);
-        if(witness != previousValue) {
+                .compareAndExchange(heapBuffer, 0, previousValue, nextValue);
+        if (witness != previousValue)
+        {
             throw new IllegalStateException("Counter: " + counter + ", next: " + nextValue +
-              ", previous: " + previousValue + ", witness: " + witness);
+                    ", previous: " + previousValue + ", witness: " + witness);
         }
         counter++;
         return witness;
     }
 
     @Benchmark
-    public long casLongUnsafeBuffer() {
+    public long casLongUnsafeBuffer()
+    {
         long nextValue = values[counter & valuesMask];
-        long previousValue = values[(counter -1) & valuesMask];
-        if (!agronaBuffer.compareAndSetLong(0, previousValue, nextValue)) {
+        long previousValue = values[(counter - 1) & valuesMask];
+        if (!agronaBuffer.compareAndSetLong(0, previousValue, nextValue))
+        {
             throw new IllegalStateException("Counter: " + counter + ", next: " + nextValue +
-              ", previous: " + previousValue);
+                    ", previous: " + previousValue);
 
         }
         counter++;
         return nextValue;
     }
 
-    @SuppressWarnings("restriction")
-    private static Unsafe getUnsafe() {
-        Field singleoneInstanceField = null;
-        try {
-            singleoneInstanceField = Unsafe.class.getDeclaredField("theUnsafe");
-            singleoneInstanceField.setAccessible(true);
-            return (Unsafe) singleoneInstanceField.get(null);
-        } catch (NoSuchFieldException | IllegalAccessException e) {
-            throw new IllegalStateException("Cannot get unsafe", e);
-        }
-    }
+    @Benchmark
+    @Fork(jvmArgsPrepend = "-Dagrona.disable.bounds.checks=true")
+    public long casLongUnsafeBufferWithoutBoundsCheck()
+    {
+        long nextValue = values[counter & valuesMask];
+        long previousValue = values[(counter - 1) & valuesMask];
+        if (!agronaBuffer.compareAndSetLong(0, previousValue, nextValue))
+        {
+            throw new IllegalStateException("Counter: " + counter + ", next: " + nextValue +
+                    ", previous: " + previousValue);
 
+        }
+        counter++;
+        return nextValue;
+    }
 }
