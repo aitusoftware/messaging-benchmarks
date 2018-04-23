@@ -57,10 +57,11 @@ import java.util.concurrent.atomic.AtomicLong;
 @OutputTimeUnit(TimeUnit.NANOSECONDS)
 @BenchmarkMode(Mode.AverageTime)
 @Fork(1)
-public class LongByteArrayCompareAndSwapBenchmark
+public class LongByteArrayBenchmark
 {
     private static final VarHandle LONG_ARRAY_VIEW =
             MethodHandles.byteBufferViewVarHandle(long[].class, ByteOrder.nativeOrder());
+    private static final int BUFFER_OFFSET = 128;
 
     private final AtomicLong atomic = new AtomicLong();
     private final ByteBuffer heapBuffer = ByteBuffer.allocate(8192).alignedSlice(8);
@@ -75,10 +76,10 @@ public class LongByteArrayCompareAndSwapBenchmark
     {
         atomic.set(values[0]);
         LONG_ARRAY_VIEW
-                .compareAndExchange(nativeBuffer, 0, 0, values[0]);
+                .compareAndExchange(nativeBuffer, BUFFER_OFFSET, 0, values[0]);
         LONG_ARRAY_VIEW
-                .compareAndExchange(heapBuffer, 0, 0, values[0]);
-        agronaBuffer.getAndSetLong(0, values[0]);
+                .compareAndExchange(heapBuffer, BUFFER_OFFSET, 0, values[0]);
+        agronaBuffer.getAndSetLong(BUFFER_OFFSET, values[0]);
         counter = 1;
     }
 
@@ -103,7 +104,7 @@ public class LongByteArrayCompareAndSwapBenchmark
         long nextValue = values[counter & valuesMask];
         long previousValue = values[(counter - 1) & valuesMask];
         final long witness = (long) LONG_ARRAY_VIEW
-                .compareAndExchange(nativeBuffer, 0, previousValue, nextValue);
+                .compareAndExchange(nativeBuffer, BUFFER_OFFSET, previousValue, nextValue);
         if (witness != previousValue)
         {
             throw new IllegalStateException("Counter: " + counter + ", next: " + nextValue +
@@ -119,7 +120,7 @@ public class LongByteArrayCompareAndSwapBenchmark
         long nextValue = values[counter & valuesMask];
         long previousValue = values[(counter - 1) & valuesMask];
         final long witness = (long) LONG_ARRAY_VIEW
-                .compareAndExchange(heapBuffer, 0, previousValue, nextValue);
+                .compareAndExchange(heapBuffer, BUFFER_OFFSET, previousValue, nextValue);
         if (witness != previousValue)
         {
             throw new IllegalStateException("Counter: " + counter + ", next: " + nextValue +
@@ -134,7 +135,7 @@ public class LongByteArrayCompareAndSwapBenchmark
     {
         long nextValue = values[counter & valuesMask];
         long previousValue = values[(counter - 1) & valuesMask];
-        if (!agronaBuffer.compareAndSetLong(0, previousValue, nextValue))
+        if (!agronaBuffer.compareAndSetLong(BUFFER_OFFSET, previousValue, nextValue))
         {
             throw new IllegalStateException("Counter: " + counter + ", next: " + nextValue +
                     ", previous: " + previousValue);
@@ -150,7 +151,7 @@ public class LongByteArrayCompareAndSwapBenchmark
     {
         long nextValue = values[counter & valuesMask];
         long previousValue = values[(counter - 1) & valuesMask];
-        if (!agronaBuffer.compareAndSetLong(0, previousValue, nextValue))
+        if (!agronaBuffer.compareAndSetLong(BUFFER_OFFSET, previousValue, nextValue))
         {
             throw new IllegalStateException("Counter: " + counter + ", next: " + nextValue +
                     ", previous: " + previousValue);
@@ -159,4 +160,36 @@ public class LongByteArrayCompareAndSwapBenchmark
         counter++;
         return nextValue;
     }
+
+    @Benchmark
+    public long longAtomic()
+    {
+        return atomic.get();
+    }
+
+    @Benchmark
+    public long longNativeByteBuffer()
+    {
+        return (long) LONG_ARRAY_VIEW.getVolatile(nativeBuffer, BUFFER_OFFSET);
+    }
+
+    @Benchmark
+    public long longHeapByteBuffer()
+    {
+        return (long) LONG_ARRAY_VIEW.getVolatile(heapBuffer, BUFFER_OFFSET);
+    }
+
+    @Benchmark
+    public long longUnsafeBuffer()
+    {
+        return agronaBuffer.getLongVolatile(BUFFER_OFFSET);
+    }
+
+    @Benchmark
+    @Fork(jvmArgsPrepend = "-Dagrona.disable.bounds.checks=true")
+    public long longUnsafeBufferWithoutBoundsCheck()
+    {
+        return agronaBuffer.getLongVolatile(BUFFER_OFFSET);
+    }
+
 }
