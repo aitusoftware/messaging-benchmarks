@@ -133,7 +133,7 @@ public class SimpleAtomicVsUnsafeBenchmark
         counter = 1;
     }
 
-    @TearDown
+    @TearDown(Level.Iteration)
     public void tearDown(Blackhole bh) {
         bh.consume(atomic.get());
         bh.consume(updater.get());
@@ -184,28 +184,23 @@ public class SimpleAtomicVsUnsafeBenchmark
     }
 
     @Benchmark
-    public void atomicLazySet(Blackhole bh)
+    public void atomicLazySet()
     {
         atomic.lazySet(values[counter & valuesMask]);
-        bh.consume(atomic);
         counter++;
     }
 
     @Benchmark
-    public void updaterLazySet(Blackhole bh)
+    public void updaterLazySet()
     {
         updater.lazySet(values[counter & valuesMask]);
-        bh.consume(updater);
         counter++;
     }
 
     @Benchmark
-    public void unsafeLazySet(Blackhole bh)
+    public void unsafeLazySet()
     {
         unsafe.lazySet(values[counter & valuesMask]);
-        bh.consume(unsafe);
         counter++;
     }
-
-
 }
