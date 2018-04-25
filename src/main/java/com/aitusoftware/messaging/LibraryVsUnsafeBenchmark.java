@@ -96,7 +96,7 @@ public class LibraryVsUnsafeBenchmark
     }
 
     @Benchmark
-    public long casAtomic() {
+    public long getAndAddAtomic() {
         long nextValue = values[counter & valuesMask];
         counter++;
 
@@ -104,7 +104,7 @@ public class LibraryVsUnsafeBenchmark
     }
 
     @Benchmark
-    public long casUpdater() {
+    public long getAndAddUpdater() {
         long nextValue = values[counter & valuesMask];
         counter++;
 
@@ -112,7 +112,7 @@ public class LibraryVsUnsafeBenchmark
     }
 
     @Benchmark
-    public long casUnsafe() {
+    public long getAndAddUnsafe() {
         long nextValue = values[counter & valuesMask];
         counter++;
 
@@ -120,7 +120,7 @@ public class LibraryVsUnsafeBenchmark
     }
 
     @Benchmark
-    public long casVarHandle() {
+    public long getAndAddVarHandle() {
         long nextValue = values[counter & valuesMask];
         counter++;
 

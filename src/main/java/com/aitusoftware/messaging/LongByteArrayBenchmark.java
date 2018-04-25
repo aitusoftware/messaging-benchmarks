@@ -32,24 +32,13 @@
 package com.aitusoftware.messaging;
 
 import org.agrona.concurrent.UnsafeBuffer;
-import org.openjdk.jmh.annotations.Benchmark;
-import org.openjdk.jmh.annotations.BenchmarkMode;
-import org.openjdk.jmh.annotations.Fork;
-import org.openjdk.jmh.annotations.Level;
-import org.openjdk.jmh.annotations.Measurement;
-import org.openjdk.jmh.annotations.Mode;
-import org.openjdk.jmh.annotations.OutputTimeUnit;
-import org.openjdk.jmh.annotations.Scope;
-import org.openjdk.jmh.annotations.Setup;
-import org.openjdk.jmh.annotations.State;
-import org.openjdk.jmh.annotations.Warmup;
+import org.openjdk.jmh.annotations.*;
 
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.VarHandle;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicLong;
 
 @State(Scope.Benchmark)
 @Measurement(iterations = 10)
@@ -82,66 +71,38 @@ public class LongByteArrayBenchmark
     }
 
     @Benchmark
-    public long casLongNativeByteBuffer()
+    public long getAndAddLongNativeByteBuffer()
     {
         long nextValue = values[counter & valuesMask];
-        long previousValue = values[(counter - 1) & valuesMask];
-        final long witness = (long) LONG_ARRAY_VIEW
-                .compareAndExchange(nativeBuffer, BUFFER_OFFSET, previousValue, nextValue);
-        if (witness != previousValue)
-        {
-            throw new IllegalStateException("Counter: " + counter + ", next: " + nextValue +
-                    ", previous: " + previousValue + ", witness: " + witness);
-        }
         counter++;
-        return witness;
+        return (long) LONG_ARRAY_VIEW
+                .getAndAdd(nativeBuffer, BUFFER_OFFSET, nextValue);
     }
 
     @Benchmark
-    public long casLongHeapByteBuffer()
+    public long getAndAddLongHeapByteBuffer()
     {
         long nextValue = values[counter & valuesMask];
-        long previousValue = values[(counter - 1) & valuesMask];
-        final long witness = (long) LONG_ARRAY_VIEW
-                .compareAndExchange(heapBuffer, BUFFER_OFFSET, previousValue, nextValue);
-        if (witness != previousValue)
-        {
-            throw new IllegalStateException("Counter: " + counter + ", next: " + nextValue +
-                    ", previous: " + previousValue + ", witness: " + witness);
-        }
         counter++;
-        return witness;
+        return (long) LONG_ARRAY_VIEW
+                .getAndAdd(heapBuffer, BUFFER_OFFSET, nextValue);
     }
 
     @Benchmark
-    public long casLongUnsafeBuffer()
+    public long getAndAddLongUnsafeBuffer()
     {
         long nextValue = values[counter & valuesMask];
-        long previousValue = values[(counter - 1) & valuesMask];
-        if (!agronaBuffer.compareAndSetLong(BUFFER_OFFSET, previousValue, nextValue))
-        {
-            throw new IllegalStateException("Counter: " + counter + ", next: " + nextValue +
-                    ", previous: " + previousValue);
-
-        }
         counter++;
-        return nextValue;
+        return agronaBuffer.getAndAddLong(BUFFER_OFFSET, nextValue);
     }
 
     @Benchmark
     @Fork(jvmArgsPrepend = "-Dagrona.disable.bounds.checks=true")
-    public long casLongUnsafeBufferWithoutBoundsCheck()
+    public long getAndAddLongUnsafeBufferWithoutBoundsCheck()
     {
         long nextValue = values[counter & valuesMask];
-        long previousValue = values[(counter - 1) & valuesMask];
-        if (!agronaBuffer.compareAndSetLong(BUFFER_OFFSET, previousValue, nextValue))
-        {
-            throw new IllegalStateException("Counter: " + counter + ", next: " + nextValue +
-                    ", previous: " + previousValue);
-
-        }
         counter++;
-        return nextValue;
+        return agronaBuffer.getAndAddLong(BUFFER_OFFSET, nextValue);
     }
 
     @Benchmark
