@@ -63,7 +63,6 @@ public class LongByteArrayBenchmark
             MethodHandles.byteBufferViewVarHandle(long[].class, ByteOrder.nativeOrder());
     private static final int BUFFER_OFFSET = 128;
 
-    private final AtomicLong atomic = new AtomicLong();
     private final ByteBuffer heapBuffer = ByteBuffer.allocate(8192).alignedSlice(8);
     private final ByteBuffer nativeBuffer = ByteBuffer.allocateDirect(8192).alignedSlice(8);
     private final long[] values = new long[]{0, 1, 2, 3, 4, 5, 6, 7};
@@ -74,28 +73,12 @@ public class LongByteArrayBenchmark
     @Setup(Level.Trial)
     public void setup()
     {
-        atomic.set(values[0]);
         LONG_ARRAY_VIEW
                 .compareAndExchange(nativeBuffer, BUFFER_OFFSET, 0, values[0]);
         LONG_ARRAY_VIEW
                 .compareAndExchange(heapBuffer, BUFFER_OFFSET, 0, values[0]);
         agronaBuffer.getAndSetLong(BUFFER_OFFSET, values[0]);
         counter = 1;
-    }
-
-    @Benchmark
-    public long casLongAtomic()
-    {
-        long nextValue = values[counter & valuesMask];
-        long previousValue = values[(counter - 1) & valuesMask];
-        final long witness = atomic.compareAndExchange(previousValue, nextValue);
-        if (witness != previousValue)
-        {
-            throw new IllegalStateException("Counter: " + counter + ", next: " + nextValue +
-                    ", previous: " + previousValue + ", witness: " + witness);
-        }
-        counter++;
-        return witness;
     }
 
     @Benchmark
@@ -162,34 +145,27 @@ public class LongByteArrayBenchmark
     }
 
     @Benchmark
-    public long longAtomic()
-    {
-        return atomic.get();
-    }
-
-    @Benchmark
-    public long longNativeByteBuffer()
+    public long getLongVolatileNativeByteBuffer()
     {
         return (long) LONG_ARRAY_VIEW.getVolatile(nativeBuffer, BUFFER_OFFSET);
     }
 
     @Benchmark
-    public long longHeapByteBuffer()
+    public long getLongVolatileHeapByteBuffer()
     {
         return (long) LONG_ARRAY_VIEW.getVolatile(heapBuffer, BUFFER_OFFSET);
     }
 
     @Benchmark
-    public long longUnsafeBuffer()
+    public long getLongVolatileUnsafeBuffer()
     {
         return agronaBuffer.getLongVolatile(BUFFER_OFFSET);
     }
 
     @Benchmark
     @Fork(jvmArgsPrepend = "-Dagrona.disable.bounds.checks=true")
-    public long longUnsafeBufferWithoutBoundsCheck()
+    public long getLongVolatileUnsafeBufferWithoutBoundsCheck()
     {
         return agronaBuffer.getLongVolatile(BUFFER_OFFSET);
     }
-
 }

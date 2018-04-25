@@ -53,7 +53,12 @@ public class DataCopyBenchmark {
         return source.position();
     }
 
-    // TODO copy using long/int/byte
+    @Benchmark
+    public long copyByteBufferChunk() {
+        source.clear();
+        nativeBuffer.clear();
+        return copyBufferChunks(source, nativeBuffer);
+    }
 
     @Benchmark
     public long zeroUnsafeBuffer() {
@@ -79,6 +84,15 @@ public class DataCopyBenchmark {
     @Benchmark
     public long zeroByteBufferFourBytes() {
         return zeroBuffer(0);
+    }
+
+    private long copyBufferChunks(ByteBuffer src, ByteBuffer dst) {
+        int chunks = src.remaining() / 8;
+        for (int i = 0; i < chunks; i++) {
+            dst.putLong(src.getLong());
+        }
+        dst.put(src);
+        return src.remaining();
     }
 
     private long zeroBuffer(int value) {
