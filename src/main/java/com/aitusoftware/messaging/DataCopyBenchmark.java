@@ -1,7 +1,17 @@
 package com.aitusoftware.messaging;
 
 import org.agrona.concurrent.UnsafeBuffer;
-import org.openjdk.jmh.annotations.*;
+import org.openjdk.jmh.annotations.Benchmark;
+import org.openjdk.jmh.annotations.BenchmarkMode;
+import org.openjdk.jmh.annotations.Fork;
+import org.openjdk.jmh.annotations.Measurement;
+import org.openjdk.jmh.annotations.Mode;
+import org.openjdk.jmh.annotations.OutputTimeUnit;
+import org.openjdk.jmh.annotations.Param;
+import org.openjdk.jmh.annotations.Scope;
+import org.openjdk.jmh.annotations.Setup;
+import org.openjdk.jmh.annotations.State;
+import org.openjdk.jmh.annotations.Warmup;
 
 import java.nio.ByteBuffer;
 import java.util.concurrent.TimeUnit;
@@ -21,6 +31,7 @@ public class DataCopyBenchmark {
 
     @Param(value = {"64", "256", "1024", "4096", "262144", "2097152"})
     private int payloadSize;
+    private int eightByteStepCount;
 
     @Setup
     public void setup() {
@@ -28,6 +39,7 @@ public class DataCopyBenchmark {
         for (int i = 0; i < payloadSize / 8; i += 8) {
             source.putLong(i / 8, (byte) i);
         }
+        eightByteStepCount = payloadSize / 8;
     }
 
     @Benchmark
@@ -53,7 +65,17 @@ public class DataCopyBenchmark {
         return source.position();
     }
 
-    // TODO copy using long/int/byte
+    @Benchmark
+    public long copyByteBufferEightBytes() {
+        source.clear();
+        nativeBuffer.clear();
+
+        for (int i = 0; i < eightByteStepCount; i += 8) {
+            nativeBuffer.putLong(i, source.get(i));
+        }
+
+        return nativeBuffer.get(0);
+    }
 
     @Benchmark
     public long zeroUnsafeBuffer() {
@@ -77,17 +99,9 @@ public class DataCopyBenchmark {
     }
 
     @Benchmark
-    public long zeroByteBufferFourBytes() {
-        return zeroBuffer(0);
-    }
-
-    private long zeroBuffer(int value) {
-        long intValue = value;
-        intValue |= value << 8;
-        intValue |= value << 16;
-        intValue |= value << 24;
-        for (int i = 0; i < payloadSize / 4; i += 4) {
-            nativeBuffer.putInt(i, (int) intValue);
+    public long zeroByteBufferEightBytes() {
+        for (int i = 0; i < eightByteStepCount; i += 8) {
+            nativeBuffer.putLong(i, 0);
         }
         return nativeBuffer.get(0);
     }
