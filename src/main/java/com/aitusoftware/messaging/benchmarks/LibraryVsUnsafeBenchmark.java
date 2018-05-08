@@ -29,7 +29,7 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-package com.aitusoftware.messaging;
+package com.aitusoftware.messaging.benchmarks;
 
 import org.agrona.UnsafeAccess;
 import org.openjdk.jmh.annotations.*;
@@ -96,36 +96,32 @@ public class LibraryVsUnsafeBenchmark
     }
 
     @Benchmark
-    public long atomicCompareAndSet() {
+    public long atomicGetAndAdd() {
         long nextValue = values[counter & valuesMask];
-        long previousValue = values[(counter - 1) & valuesMask];
         counter++;
 
         return atomic.getAndAdd(nextValue);
     }
 
     @Benchmark
-    public long updaterCompareAndSet() {
+    public long updaterGetAndAdd() {
         long nextValue = values[counter & valuesMask];
-        long previousValue = values[(counter - 1) & valuesMask];
         counter++;
 
         return updater.getAndAdd(nextValue);
     }
 
     @Benchmark
-    public long unsafeCompareAndSet() {
+    public long unsafeGetAndAdd() {
         long nextValue = values[counter & valuesMask];
-        long previousValue = values[(counter - 1) & valuesMask];
         counter++;
 
         return unsafe.getAndAdd(nextValue);
     }
 
     @Benchmark
-    public long varHandleCompareAndSet() {
+    public long varHandleGetAndAdd() {
         long nextValue = values[counter & valuesMask];
-        long previousValue = values[(counter - 1) & valuesMask];
         counter++;
 
         return varHandle.getAndAdd(nextValue);
