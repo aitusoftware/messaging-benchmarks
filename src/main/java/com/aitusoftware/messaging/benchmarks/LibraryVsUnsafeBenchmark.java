@@ -29,7 +29,7 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-package com.aitusoftware.messaging;
+package com.aitusoftware.messaging.benchmarks;
 
 import org.agrona.UnsafeAccess;
 import org.openjdk.jmh.annotations.*;
@@ -75,28 +75,28 @@ public class LibraryVsUnsafeBenchmark
     }
 
     @Benchmark
-    public long getVolatileAtomic()
+    public long atomicGetVolatile()
     {
         return atomic.get();
     }
 
     @Benchmark
-    public long getVolatileUpdater() {
+    public long updaterGetVolatile() {
         return updater.get();
     }
 
     @Benchmark
-    public long getVolatileUnsafe() {
+    public long unsafeGetVolatile() {
         return unsafe.get();
     }
 
     @Benchmark
-    public long getVolatileVarHandle() {
+    public long varHandleGetVolatile() {
         return varHandle.get();
     }
 
     @Benchmark
-    public long getAndAddAtomic() {
+    public long atomicGetAndAdd() {
         long nextValue = values[counter & valuesMask];
         counter++;
 
@@ -104,7 +104,7 @@ public class LibraryVsUnsafeBenchmark
     }
 
     @Benchmark
-    public long getAndAddUpdater() {
+    public long updaterGetAndAdd() {
         long nextValue = values[counter & valuesMask];
         counter++;
 
@@ -112,7 +112,7 @@ public class LibraryVsUnsafeBenchmark
     }
 
     @Benchmark
-    public long getAndAddUnsafe() {
+    public long unsafeGetAndAdd() {
         long nextValue = values[counter & valuesMask];
         counter++;
 
@@ -120,7 +120,7 @@ public class LibraryVsUnsafeBenchmark
     }
 
     @Benchmark
-    public long getAndAddVarHandle() {
+    public long varHandleGetAndAdd() {
         long nextValue = values[counter & valuesMask];
         counter++;
 
@@ -128,28 +128,28 @@ public class LibraryVsUnsafeBenchmark
     }
 
     @Benchmark
-    public void lazySetAtomic()
+    public void atomicLazySet()
     {
         atomic.lazySet(values[counter & valuesMask]);
         counter++;
     }
 
     @Benchmark
-    public void lazySetUpdater()
+    public void updaterLazySet()
     {
         updater.lazySet(values[counter & valuesMask]);
         counter++;
     }
 
     @Benchmark
-    public void lazySetUnsafe()
+    public void unsafeLazySet()
     {
         unsafe.lazySet(values[counter & valuesMask]);
         counter++;
     }
 
     @Benchmark
-    public void lazySetVarHandle()
+    public void varHandleLazySet()
     {
         varHandle.lazySet(values[counter & valuesMask]);
         counter++;
