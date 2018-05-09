@@ -1,10 +1,9 @@
 package com.aitusoftware.messaging.ipc;
 
+import org.agrona.concurrent.UnsafeBuffer;
+
 import java.io.IOException;
-import java.lang.invoke.MethodHandles;
-import java.lang.invoke.VarHandle;
 import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
@@ -14,23 +13,21 @@ import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 import java.util.function.Consumer;
 
-public final class OffHeapByteBufferTransport
+public final class UnsafeBufferTransport
 {
     private static final int CACHE_LINE_SIZE_IN_BYTES = 64;
     private static final int DATA_OFFSET = CACHE_LINE_SIZE_IN_BYTES * 4;
     private static final int MESSAGE_HEADER_LENGTH = CACHE_LINE_SIZE_IN_BYTES;
-    private static final VarHandle VIEW =
-            MethodHandles.byteBufferViewVarHandle(long[].class, ByteOrder.nativeOrder());
 
-    private final ByteBuffer data;
-    private final ByteBuffer messageBuffer;
+    private final UnsafeBuffer data;
+    private final UnsafeBuffer messageBuffer;
     private static final int PUBLISHER_SEQUENCE_OFFSET = 8 * 7;
     private static final int SUBSCRIBER_SEQUENCE_OFFSET = CACHE_LINE_SIZE_IN_BYTES + (8 * 7);
     private final long mask;
     private final FileChannel channel;
     private long writeOffset;
 
-    public OffHeapByteBufferTransport(Path path, long size) throws IOException
+    public UnsafeBufferTransport(Path path, long size) throws IOException
     {
         channel = FileChannel.open(path, StandardOpenOption.CREATE,
                 StandardOpenOption.WRITE, StandardOpenOption.READ);
@@ -43,9 +40,9 @@ public final class OffHeapByteBufferTransport
             throw new IllegalArgumentException();
         }
 
-        this.data = data.alignedSlice(8);
-        this.messageBuffer = data.position(DATA_OFFSET).limit(DATA_OFFSET + (int) size).slice();
-        this.data.clear();
+        ByteBuffer aligned = data.alignedSlice(8);
+        this.data = new UnsafeBuffer(aligned);
+        this.messageBuffer = new UnsafeBuffer(aligned, DATA_OFFSET, (int) size);
         this.mask = messageBuffer.capacity() - 1;
 
         if (data.remaining() < 2 * CACHE_LINE_SIZE_IN_BYTES)
@@ -61,55 +58,52 @@ public final class OffHeapByteBufferTransport
     private long lastConsumedSequence = 0L;
     private long writeLimit = -1L;
 
-    public long writeRecord(final ByteBuffer message)
+    public long writeRecord(final UnsafeBuffer message)
     {
         if (writeLimit == -1L)
         {
             writeLimit = getSubscriberOffset() + messageBuffer.capacity();
         }
-        if (writeOffset + message.remaining() > writeLimit)
+        if (writeOffset + message.capacity() > writeLimit)
         {
             writeLimit = getSubscriberOffset() + messageBuffer.capacity();
         }
 
-        if (writeOffset + message.remaining() > writeLimit)
+        if (writeOffset + message.capacity() > writeLimit)
         {
-            while (writeOffset + message.remaining() > writeLimit) {
+            while (writeOffset + message.capacity() > writeLimit) {
                 writeLimit = getSubscriberOffset() + messageBuffer.capacity();
             }
         }
 
-        final int messageSize = message.remaining();
+        final int messageSize = message.capacity();
         if (messageSize == 0)
         {
             return -1;
         }
         final int paddedSize = padToCacheLine(messageSize + MESSAGE_HEADER_LENGTH);
-        writeOffset = (long) VIEW.getAndAdd(data, PUBLISHER_SEQUENCE_OFFSET,
-                paddedSize);
+        writeOffset = data.getAndAddLong(PUBLISHER_SEQUENCE_OFFSET, paddedSize);
         final int actualOffset = mask(writeOffset) + MESSAGE_HEADER_LENGTH;
-        messageBuffer.position(actualOffset);
-        messageBuffer.put(message);
-        VIEW.setRelease(messageBuffer, mask(writeOffset), (long) messageSize);
+        messageBuffer.putBytes(actualOffset, message, 0, messageSize);
+        data.putLongOrdered(mask(writeOffset), messageSize);
         return writeOffset;
     }
 
+    private final UnsafeBuffer receiverView = new UnsafeBuffer();
 
-    public int poll(final Consumer<ByteBuffer> receiver)
+    public int poll(final Consumer<UnsafeBuffer> receiver)
     {
-        final int messageSize = (int) ((long) VIEW.getVolatile(messageBuffer, mask(lastConsumedSequence)));
+        final int messageSize = (int) ((long) data.getLongVolatile(mask(lastConsumedSequence)));
         if (messageSize != 0)
         {
             final int newPosition = mask(lastConsumedSequence + MESSAGE_HEADER_LENGTH);
             final int newLimit = newPosition + messageSize;
-            messageBuffer.limit(newLimit);
-            messageBuffer.position(newPosition);
-            receiver.accept(messageBuffer);
-            VIEW.setRelease(data, SUBSCRIBER_SEQUENCE_OFFSET, lastConsumedSequence);
+            receiverView.wrap(messageBuffer, newPosition, messageSize);
+            receiver.accept(receiverView);
+            data.putLongOrdered(SUBSCRIBER_SEQUENCE_OFFSET, lastConsumedSequence);
             // program order should ensure the next read sees zero, unless written by the producer
-            VIEW.set(data, newPosition - MESSAGE_HEADER_LENGTH, 0L);
+            data.putLong(newPosition - MESSAGE_HEADER_LENGTH, 0L);
             lastConsumedSequence += padToCacheLine(messageSize + MESSAGE_HEADER_LENGTH);
-            messageBuffer.limit(messageBuffer.capacity());
         }
 
         return messageSize;
@@ -117,7 +111,7 @@ public final class OffHeapByteBufferTransport
 
     private long getSubscriberOffset()
     {
-        return (long) VIEW.getVolatile(data, SUBSCRIBER_SEQUENCE_OFFSET);
+        return (long) data.getLongVolatile(SUBSCRIBER_SEQUENCE_OFFSET);
     }
 
     void sync() throws IOException
@@ -137,10 +131,10 @@ public final class OffHeapByteBufferTransport
         {
             Files.delete(ipcFile);
         }
-        final OffHeapByteBufferTransport publishTransport =
-                new OffHeapByteBufferTransport(ipcFile, 4096);
-        final OffHeapByteBufferTransport subscribeTransport =
-                new OffHeapByteBufferTransport(ipcFile, 4096);
+        final UnsafeBufferTransport publishTransport =
+                new UnsafeBufferTransport(ipcFile, 4096);
+        final UnsafeBufferTransport subscribeTransport =
+                new UnsafeBufferTransport(ipcFile, 4096);
         for (int i = 0; i < 400; i++)
         {
             if (i % 10 == 0)
@@ -150,15 +144,15 @@ public final class OffHeapByteBufferTransport
                     // spin
                 }
             }
-            publishTransport.writeRecord(ByteBuffer.wrap(("some data " + i)
+            publishTransport.writeRecord(new UnsafeBuffer(("some data " + i)
                     .getBytes(StandardCharsets.UTF_8)));
         }
     }
 
-    void printRecord(ByteBuffer b)
+    void printRecord(UnsafeBuffer b)
     {
-        byte[] tmp = new byte[b.remaining()];
-        b.get(tmp);
+        byte[] tmp = new byte[b.capacity()];
+        b.getBytes(0, tmp);
         System.out.printf("%s%n", new String(tmp, StandardCharsets.UTF_8));
     }
 

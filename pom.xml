@@ -67,6 +67,11 @@ THE POSSIBILITY OF SUCH DAMAGE.
             <artifactId>jol-core</artifactId>
             <version>0.9</version>
         </dependency>
+        <dependency>
+            <groupId>org.hdrhistogram</groupId>
+            <artifactId>HdrHistogram</artifactId>
+            <version>2.1.10</version>
+        </dependency>
     </dependencies>
 
     <properties>
