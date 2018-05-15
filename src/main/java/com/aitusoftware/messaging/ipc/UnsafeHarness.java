@@ -8,8 +8,7 @@ import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.*;
 
 public final class UnsafeHarness {
     private static final int MESSAGE_COUNT = 1_000_000;
@@ -71,8 +70,9 @@ public final class UnsafeHarness {
     }
 
     void runLoop() {
-        ExecutorService executor = Executors.newSingleThreadExecutor();
+        ExecutorService executor = Executors.newCachedThreadPool();
         executor.submit(this::echoLoop);
+        Future<?> future = executor.submit(this::receiveLoop);
         Thread.currentThread().setName("harness");
         try {
             for (int i = 0; i < MESSAGE_COUNT; i++) {
@@ -85,19 +85,25 @@ public final class UnsafeHarness {
                     return;
                 }
 
-                while (clientSubscriber.poll(this::receiveMessage) != 0) {
-                    // spin
-                }
             }
-            while (count < MESSAGE_COUNT) {
-                clientSubscriber.poll(this::receiveMessage);
-            }
+            future.get(10, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (ExecutionException | TimeoutException e) {
+            e.printStackTrace();
         } finally {
             executor.shutdownNow();
             histogram.outputPercentileDistribution(System.out, 1d);
         }
     }
     int count = 0;
+
+    void receiveLoop() {
+        while (count < MESSAGE_COUNT) {
+            clientSubscriber.poll(this::receiveMessage);
+        }
+    }
+
 
     void receiveMessage(UnsafeBuffer message) {
         long rttNanos = System.nanoTime() - message.getLong(0);
@@ -106,6 +112,5 @@ public final class UnsafeHarness {
 //        }
         count++;
         histogram.recordValue(Math.min(MAX_VALUE, rttNanos));
-        System.out.println(rttNanos);
     }
 }

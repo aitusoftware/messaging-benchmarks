@@ -20,7 +20,7 @@ public final class UnsafeBufferTransport
     private final UnsafeBuffer messageBuffer;
     private static final int PUBLISHER_SEQUENCE_OFFSET = 8 * 7;
     private static final int SUBSCRIBER_SEQUENCE_OFFSET = CACHE_LINE_SIZE_IN_BYTES + (8 * 7);
-    private static final boolean DEBUG = true;
+    private static final boolean DEBUG = false;
     private final long mask;
     private final FileChannel channel;
     private final Path path;
@@ -107,10 +107,10 @@ public final class UnsafeBufferTransport
 
             int pointerPosition = mask(writeOffset);
             long retryResult = writeRecord(message);
-            data.putLongOrdered(pointerPosition, (long) -paddedSize);
-            long check = data.getLongVolatile(pointerPosition);
+            messageBuffer.putLongOrdered(pointerPosition, (long) -paddedSize);
+            long check = messageBuffer.getLongVolatile(pointerPosition);
             if (check != -paddedSize) {
-                System.out.printf("Check failed! %d != %d%n", -paddedSize, check);
+                System.out.printf("Check failed on overflow! %d != %d%n", -paddedSize, check);
             }
             return retryResult;
         }
@@ -131,10 +131,6 @@ public final class UnsafeBufferTransport
             throw e;
         }
         messageBuffer.putLongOrdered(headerOffset, (long) messageSize);
-        long check = messageBuffer.getLongVolatile(headerOffset);
-        if (check != messageSize) {
-            System.out.printf("Check failed! %d != %d%n", messageSize, check);
-        }
         return writeOffset;
     }
 
@@ -142,13 +138,13 @@ public final class UnsafeBufferTransport
 
     public int poll(final Consumer<UnsafeBuffer> receiver)
     {
-        int messageSize = (int) ((long) data.getLongVolatile(mask(lastConsumedSequence)));
+        int messageSize = (int) ((long) messageBuffer.getLongVolatile(mask(lastConsumedSequence)));
+
         boolean skipped = false;
         if (messageSize < 0L) {
-
             long previous = this.lastConsumedSequence;
             this.lastConsumedSequence += -messageSize;
-            messageSize = (int) ((long) data.getLongVolatile(mask(this.lastConsumedSequence)));
+            messageSize = (int) ((long) messageBuffer.getLongVolatile(mask(this.lastConsumedSequence)));
             if (DEBUG) {
                 System.out.printf("Read negative message size, moved seq from %d to %d, messageSize: %d%n",
                         previous, lastConsumedSequence, messageSize);
