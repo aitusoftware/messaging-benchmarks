@@ -13,7 +13,9 @@ import java.util.function.Consumer;
 
 public final class OffHeapByteBufferTransport implements AutoCloseable
 {
+    public static final String IPC_DISABLE_SUBSCRIBER_GATE = "ipc.disable.subscriberGate";
     private static final boolean DEBUG = false;
+    private static final boolean WAIT_FOR_SUBSCRIBER = !Boolean.getBoolean(IPC_DISABLE_SUBSCRIBER_GATE);
     private static final VarHandle VIEW =
             MethodHandles.byteBufferViewVarHandle(long[].class, ByteOrder.nativeOrder());
 
@@ -78,8 +80,10 @@ public final class OffHeapByteBufferTransport implements AutoCloseable
 
         writeOffset = (long) VIEW.getAndAdd(data, Util.PUBLISHER_SEQUENCE_OFFSET, paddedSize);
 
-        if (writeOffset + paddedSize > nextBufferWrapSequence) {
-            if (DEBUG) {
+        if (writeOffset + paddedSize > nextBufferWrapSequence)
+        {
+            if (DEBUG)
+            {
                 System.out.printf("%s %s Buffer overrun, writing %d at %d and attempting another message%n",
                         path, Thread.currentThread().getName(), -paddedSize, mask(writeOffset));
             }
@@ -94,15 +98,19 @@ public final class OffHeapByteBufferTransport implements AutoCloseable
 
         int headerOffset = mask(writeOffset);
         int actualOffset = headerOffset + Util.MESSAGE_HEADER_LENGTH;
-        try {
-            if (DEBUG) {
+        try
+        {
+            if (DEBUG)
+            {
                 System.out.printf("%s %s Writing message of %db at %d [%d]%n",
                         path, Thread.currentThread().getName(),
                         paddedSize, headerOffset, writeOffset);
             }
             messageBuffer.position(actualOffset);
             messageBuffer.put(message);
-        } catch (RuntimeException e) {
+        }
+        catch (RuntimeException e)
+        {
             e.printStackTrace();
             throw e;
         }
@@ -113,7 +121,8 @@ public final class OffHeapByteBufferTransport implements AutoCloseable
     public int poll(final Consumer<ByteBuffer> receiver)
     {
         int messageSize = (int) ((long) VIEW.getVolatile(messageBuffer, mask(lastConsumedSequence)));
-        if (messageSize < 0L) {
+        if (messageSize < 0L)
+        {
 
             this.lastConsumedSequence -= messageSize;
             messageSize = (int) ((long) VIEW.getVolatile(messageBuffer, mask(this.lastConsumedSequence)));
@@ -123,14 +132,18 @@ public final class OffHeapByteBufferTransport implements AutoCloseable
             final int newPosition = mask(lastConsumedSequence + Util.MESSAGE_HEADER_LENGTH);
             final int newLimit = newPosition + messageSize;
             final int headerOffset = newPosition - Util.MESSAGE_HEADER_LENGTH;
-            if (DEBUG) {
+            if (DEBUG)
+            {
                 System.out.printf("%s %s Read message of %db at %d [%d]%n",
                         path, Thread.currentThread().getName(),
                         messageSize, headerOffset, lastConsumedSequence);
             }
-            try {
+            try
+            {
                 messageBuffer.limit(newLimit);
-            } catch (RuntimeException e) {
+            }
+            catch (RuntimeException e)
+            {
                 System.out.printf("newLimit: %d, newPosition: %d, from messageSize: %d at %d%n",
                         newLimit, newPosition, messageSize, lastConsumedSequence);
                 throw e;
@@ -145,7 +158,8 @@ public final class OffHeapByteBufferTransport implements AutoCloseable
             VIEW.setRelease(data, Util.SUBSCRIBER_SEQUENCE_OFFSET, lastConsumedSequence);
             lastConsumedSequence += paddedMessageSize;
             messageBuffer.limit(messageBuffer.capacity());
-            if (DEBUG) {
+            if (DEBUG)
+            {
                 System.out.printf("%s %s read sequence advanced to %d%n", path,
                         Thread.currentThread().getName(), lastConsumedSequence);
             }
@@ -154,24 +168,32 @@ public final class OffHeapByteBufferTransport implements AutoCloseable
         return messageSize;
     }
 
-    public void close() throws IOException {
+    public void close() throws IOException
+    {
         channel.close();
     }
 
-    private void waitForSlowSubscribers(int messageSize) {
-        if (writeOffset + messageSize > nextSubscriberSequenceCheck)
+    private void waitForSlowSubscribers(int messageSize)
+    {
+        if (WAIT_FOR_SUBSCRIBER)
         {
-            if (DEBUG) {
-                System.out.printf("%s %s writeOffset: %d, subscriber: %d%n",
-                        path, Thread.currentThread().getName(), writeOffset, getSubscriberOffset());
-            }
-            while (writeOffset + messageSize > nextSubscriberSequenceCheck) {
-                nextSubscriberSequenceCheck = getSubscriberOffset() + messageBuffer.capacity();
+            if (writeOffset + messageSize > nextSubscriberSequenceCheck)
+            {
+                if (DEBUG)
+                {
+                    System.out.printf("%s %s writeOffset: %d, subscriber: %d%n",
+                            path, Thread.currentThread().getName(), writeOffset, getSubscriberOffset());
+                }
+                while (writeOffset + messageSize > nextSubscriberSequenceCheck)
+                {
+                    nextSubscriberSequenceCheck = getSubscriberOffset() + messageBuffer.capacity();
+                }
             }
         }
     }
 
-    private void updateSubscriberCheckOffset(int messageSize) {
+    private void updateSubscriberCheckOffset(int messageSize)
+    {
         if (nextSubscriberSequenceCheck == -1L)
         {
             nextSubscriberSequenceCheck = getSubscriberOffset() + messageBuffer.capacity();
@@ -182,16 +204,20 @@ public final class OffHeapByteBufferTransport implements AutoCloseable
         }
     }
 
-    private void zero(ByteBuffer buffer) {
-        if (DEBUG) {
+    private void zero(ByteBuffer buffer)
+    {
+        if (DEBUG)
+        {
             System.out.printf("%s %s Zeroing buffer at %d - %d%n",
                     path, Thread.currentThread().getName(), buffer.position(), buffer.limit());
         }
         int chunks = buffer.remaining() / 8;
-        for (int i = 0; i < chunks; i++) {
+        for (int i = 0; i < chunks; i++)
+        {
             buffer.putLong(0);
         }
-        for (int i = 0; i < buffer.remaining(); i++) {
+        for (int i = 0; i < buffer.remaining(); i++)
+        {
             buffer.put((byte) 0);
         }
     }

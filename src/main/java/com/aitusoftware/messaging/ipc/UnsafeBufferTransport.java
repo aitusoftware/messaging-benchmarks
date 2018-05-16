@@ -15,6 +15,7 @@ import static com.aitusoftware.messaging.ipc.Util.*;
 public final class UnsafeBufferTransport implements AutoCloseable
 {
     private static final boolean DEBUG = false;
+    private static final boolean WAIT_FOR_SUBSCRIBER = !Boolean.getBoolean("ipc.disable.subscriberGate");
 
     private final UnsafeBuffer data;
     private final UnsafeBuffer messageBuffer;
@@ -63,7 +64,8 @@ public final class UnsafeBufferTransport implements AutoCloseable
     public long writeRecord(final UnsafeBuffer message)
     {
         final int messageSize = message.capacity();
-        if (messageSize == 0) {
+        if (messageSize == 0)
+        {
             return -1;
         }
 
@@ -74,8 +76,10 @@ public final class UnsafeBufferTransport implements AutoCloseable
         final int paddedSize = Util.padToCacheLine(messageSize + MESSAGE_HEADER_LENGTH);
 
         writeOffset = data.getAndAddLong(PUBLISHER_SEQUENCE_OFFSET, paddedSize);
-        if (writeOffset + paddedSize > nextBufferWrapSequence) {
-            if (DEBUG) {
+        if (writeOffset + paddedSize > nextBufferWrapSequence)
+        {
+            if (DEBUG)
+            {
                 System.out.printf("%s %s Buffer overrun, writing %d at %d and attempting another message%n",
                         path, Thread.currentThread().getName(), -paddedSize, mask(writeOffset));
             }
@@ -89,14 +93,18 @@ public final class UnsafeBufferTransport implements AutoCloseable
 
         int headerOffset = mask(writeOffset);
         int actualOffset = headerOffset + MESSAGE_HEADER_LENGTH;
-        try {
-            if (DEBUG) {
+        try
+        {
+            if (DEBUG)
+            {
                 System.out.printf("%s %s Writing message of %db at %d [%d]%n",
                         path, Thread.currentThread().getName(),
                         paddedSize, headerOffset, writeOffset);
             }
             messageBuffer.putBytes(actualOffset, message, 0, messageSize);
-        } catch (RuntimeException e) {
+        }
+        catch (RuntimeException e)
+        {
             e.printStackTrace();
             throw e;
         }
@@ -108,7 +116,8 @@ public final class UnsafeBufferTransport implements AutoCloseable
     {
         int messageSize = (int) messageBuffer.getLongVolatile(mask(lastConsumedSequence));
 
-        if (messageSize < 0L) {
+        if (messageSize < 0L)
+        {
             this.lastConsumedSequence += -messageSize;
             messageSize = (int) ((long) messageBuffer.getLongVolatile(mask(this.lastConsumedSequence)));
         }
@@ -116,7 +125,8 @@ public final class UnsafeBufferTransport implements AutoCloseable
         {
             final int newPosition = mask(lastConsumedSequence + MESSAGE_HEADER_LENGTH);
             final int headerOffset = newPosition - MESSAGE_HEADER_LENGTH;
-            if (DEBUG) {
+            if (DEBUG)
+            {
                 System.out.printf("%s %s Read message of %db at %d [%d]%n",
                         path, Thread.currentThread().getName(),
                         messageSize, newPosition - MESSAGE_HEADER_LENGTH, lastConsumedSequence);
@@ -129,7 +139,8 @@ public final class UnsafeBufferTransport implements AutoCloseable
 
             data.putLongOrdered(SUBSCRIBER_SEQUENCE_OFFSET, lastConsumedSequence);
             lastConsumedSequence += paddedMessageSize;
-            if (DEBUG) {
+            if (DEBUG)
+            {
                 System.out.printf("%s %s read sequence advanced to %d%n", path,
                         Thread.currentThread().getName(), lastConsumedSequence);
             }
@@ -138,20 +149,27 @@ public final class UnsafeBufferTransport implements AutoCloseable
         return messageSize;
     }
 
-    private void waitForSlowSubscribers(int messageSize) {
-        if (writeOffset + messageSize > nextSubscriberSequenceCheck)
+    private void waitForSlowSubscribers(int messageSize)
+    {
+        if (WAIT_FOR_SUBSCRIBER)
         {
-            if (DEBUG) {
-                System.out.printf("%s %s writeOffset: %d, subscriber: %d%n",
-                        path, Thread.currentThread().getName(), writeOffset, getSubscriberOffset());
-            }
-            while (writeOffset + messageSize > nextSubscriberSequenceCheck) {
-                nextSubscriberSequenceCheck = getSubscriberOffset() + messageBuffer.capacity();
+            if (writeOffset + messageSize > nextSubscriberSequenceCheck)
+            {
+                if (DEBUG)
+                {
+                    System.out.printf("%s %s writeOffset: %d, subscriber: %d%n",
+                            path, Thread.currentThread().getName(), writeOffset, getSubscriberOffset());
+                }
+                while (writeOffset + messageSize > nextSubscriberSequenceCheck)
+                {
+                    nextSubscriberSequenceCheck = getSubscriberOffset() + messageBuffer.capacity();
+                }
             }
         }
     }
 
-    private void updateSubscriberCheckOffset(int messageSize) {
+    private void updateSubscriberCheckOffset(int messageSize)
+    {
         if (nextSubscriberSequenceCheck == -1L)
         {
             nextSubscriberSequenceCheck = getSubscriberOffset() + messageBuffer.capacity();
@@ -162,17 +180,20 @@ public final class UnsafeBufferTransport implements AutoCloseable
         }
     }
 
-    private void zero(UnsafeBuffer buffer) {
-
+    private void zero(UnsafeBuffer buffer)
+    {
         int chunks = buffer.capacity() / 8;
         int bytes = buffer.capacity() - chunks * 8;
-        for (int i = 0; i < chunks; i++) {
+        for (int i = 0; i < chunks; i++)
+        {
             buffer.putLong(i * 8, 0);
         }
-        for (int i = 0; i < bytes; i++) {
+        for (int i = 0; i < bytes; i++)
+        {
             buffer.putLong(chunks * 8 + i, (byte) 0);
         }
-        if (DEBUG) {
+        if (DEBUG)
+        {
             System.out.printf("%s %s zeroed %db%n", path,
                     Thread.currentThread().getName(), chunks * 8 + bytes);
         }
@@ -189,7 +210,8 @@ public final class UnsafeBufferTransport implements AutoCloseable
     }
 
     @Override
-    public void close() throws Exception {
+    public void close() throws Exception
+    {
         channel.close();
     }
 }
