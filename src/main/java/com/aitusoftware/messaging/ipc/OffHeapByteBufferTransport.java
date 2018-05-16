@@ -7,20 +7,12 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 import java.util.function.Consumer;
 
 public final class OffHeapByteBufferTransport implements AutoCloseable
 {
-    private static final int CACHE_LINE_SIZE_IN_BYTES = 64;
-    private static final int DATA_OFFSET = CACHE_LINE_SIZE_IN_BYTES * 4;
-    private static final int MESSAGE_HEADER_LENGTH = CACHE_LINE_SIZE_IN_BYTES;
-    private static final int PUBLISHER_SEQUENCE_OFFSET = 8 * 7;
-    private static final int SUBSCRIBER_SEQUENCE_OFFSET = CACHE_LINE_SIZE_IN_BYTES + (8 * 7);
     private static final boolean DEBUG = false;
     private static final VarHandle VIEW =
             MethodHandles.byteBufferViewVarHandle(long[].class, ByteOrder.nativeOrder());
@@ -46,7 +38,7 @@ public final class OffHeapByteBufferTransport implements AutoCloseable
         channel = FileChannel.open(path, StandardOpenOption.CREATE,
                 StandardOpenOption.WRITE, StandardOpenOption.READ);
         final MappedByteBuffer data = channel.
-                map(FileChannel.MapMode.READ_WRITE, 0L, size + DATA_OFFSET + 8);
+                map(FileChannel.MapMode.READ_WRITE, 0L, size + Util.DATA_OFFSET + 8);
 
 
         if (Long.bitCount(size) != 1)
@@ -55,11 +47,11 @@ public final class OffHeapByteBufferTransport implements AutoCloseable
         }
 
         this.data = data.alignedSlice(8);
-        this.messageBuffer = data.position(DATA_OFFSET).limit(DATA_OFFSET + (int) size).slice();
+        this.messageBuffer = data.position(Util.DATA_OFFSET).limit(Util.DATA_OFFSET + (int) size).slice();
         this.data.clear();
         this.mask = messageBuffer.capacity() - 1;
 
-        if (data.remaining() < 2 * CACHE_LINE_SIZE_IN_BYTES)
+        if (data.remaining() < 2 * Util.CACHE_LINE_SIZE_IN_BYTES)
         {
             throw new IllegalArgumentException();
         }
@@ -73,35 +65,18 @@ public final class OffHeapByteBufferTransport implements AutoCloseable
 
     public long writeRecord(final ByteBuffer message)
     {
-        if (nextSubscriberSequenceCheck == -1L)
-        {
-            nextSubscriberSequenceCheck = getSubscriberOffset() + messageBuffer.capacity();
-        }
-        if (writeOffset + message.remaining() > nextSubscriberSequenceCheck)
-        {
-            nextSubscriberSequenceCheck = getSubscriberOffset() + messageBuffer.capacity();
-        }
-
-        if (writeOffset + message.remaining() > nextSubscriberSequenceCheck)
-        {
-            if (DEBUG) {
-                System.out.printf("%s %s writeOffset: %d, subscriber: %d%n",
-                        path, Thread.currentThread().getName(), writeOffset, getSubscriberOffset());
-            }
-            while (writeOffset + message.remaining() > nextSubscriberSequenceCheck) {
-                nextSubscriberSequenceCheck = getSubscriberOffset() + messageBuffer.capacity();
-            }
-        }
-
         final int messageSize = message.remaining();
-
         if (messageSize == 0)
         {
             return -1;
         }
-        int paddedSize = padToCacheLine(messageSize + MESSAGE_HEADER_LENGTH);
 
-        writeOffset = (long) VIEW.getAndAdd(data, PUBLISHER_SEQUENCE_OFFSET, paddedSize);
+        updateSubscriberCheckOffset(messageSize);
+        waitForSlowSubscribers(messageSize);
+
+        final int paddedSize = Util.padToCacheLine(messageSize + Util.MESSAGE_HEADER_LENGTH);
+
+        writeOffset = (long) VIEW.getAndAdd(data, Util.PUBLISHER_SEQUENCE_OFFSET, paddedSize);
 
         if (writeOffset + paddedSize > nextBufferWrapSequence) {
             if (DEBUG) {
@@ -118,7 +93,7 @@ public final class OffHeapByteBufferTransport implements AutoCloseable
         }
 
         int headerOffset = mask(writeOffset);
-        int actualOffset = headerOffset + MESSAGE_HEADER_LENGTH;
+        int actualOffset = headerOffset + Util.MESSAGE_HEADER_LENGTH;
         try {
             if (DEBUG) {
                 System.out.printf("%s %s Writing message of %db at %d [%d]%n",
@@ -135,7 +110,6 @@ public final class OffHeapByteBufferTransport implements AutoCloseable
         return writeOffset;
     }
 
-
     public int poll(final Consumer<ByteBuffer> receiver)
     {
         int messageSize = (int) ((long) VIEW.getVolatile(messageBuffer, mask(lastConsumedSequence)));
@@ -146,9 +120,9 @@ public final class OffHeapByteBufferTransport implements AutoCloseable
         }
         if (messageSize != 0)
         {
-            final int newPosition = mask(lastConsumedSequence + MESSAGE_HEADER_LENGTH);
+            final int newPosition = mask(lastConsumedSequence + Util.MESSAGE_HEADER_LENGTH);
             final int newLimit = newPosition + messageSize;
-            int headerOffset = newPosition - MESSAGE_HEADER_LENGTH;
+            final int headerOffset = newPosition - Util.MESSAGE_HEADER_LENGTH;
             if (DEBUG) {
                 System.out.printf("%s %s Read message of %db at %d [%d]%n",
                         path, Thread.currentThread().getName(),
@@ -164,11 +138,11 @@ public final class OffHeapByteBufferTransport implements AutoCloseable
             messageBuffer.position(newPosition);
             receiver.accept(messageBuffer);
             messageBuffer.position(headerOffset);
-            int paddedMessageSize = padToCacheLine(messageSize + MESSAGE_HEADER_LENGTH);
+            final int paddedMessageSize = Util.padToCacheLine(messageSize + Util.MESSAGE_HEADER_LENGTH);
             messageBuffer.limit(headerOffset + paddedMessageSize);
             zero(messageBuffer);
 
-            VIEW.setRelease(data, SUBSCRIBER_SEQUENCE_OFFSET, lastConsumedSequence);
+            VIEW.setRelease(data, Util.SUBSCRIBER_SEQUENCE_OFFSET, lastConsumedSequence);
             lastConsumedSequence += paddedMessageSize;
             messageBuffer.limit(messageBuffer.capacity());
             if (DEBUG) {
@@ -182,6 +156,30 @@ public final class OffHeapByteBufferTransport implements AutoCloseable
 
     public void close() throws IOException {
         channel.close();
+    }
+
+    private void waitForSlowSubscribers(int messageSize) {
+        if (writeOffset + messageSize > nextSubscriberSequenceCheck)
+        {
+            if (DEBUG) {
+                System.out.printf("%s %s writeOffset: %d, subscriber: %d%n",
+                        path, Thread.currentThread().getName(), writeOffset, getSubscriberOffset());
+            }
+            while (writeOffset + messageSize > nextSubscriberSequenceCheck) {
+                nextSubscriberSequenceCheck = getSubscriberOffset() + messageBuffer.capacity();
+            }
+        }
+    }
+
+    private void updateSubscriberCheckOffset(int messageSize) {
+        if (nextSubscriberSequenceCheck == -1L)
+        {
+            nextSubscriberSequenceCheck = getSubscriberOffset() + messageBuffer.capacity();
+        }
+        if (writeOffset + messageSize > nextSubscriberSequenceCheck)
+        {
+            nextSubscriberSequenceCheck = getSubscriberOffset() + messageBuffer.capacity();
+        }
     }
 
     private void zero(ByteBuffer buffer) {
@@ -200,12 +198,7 @@ public final class OffHeapByteBufferTransport implements AutoCloseable
 
     private long getSubscriberOffset()
     {
-        return (long) VIEW.getVolatile(data, SUBSCRIBER_SEQUENCE_OFFSET);
-    }
-
-    private static int padToCacheLine(int messageSize)
-    {
-        return messageSize + 64 - ((messageSize) & 63);
+        return (long) VIEW.getVolatile(data, Util.SUBSCRIBER_SEQUENCE_OFFSET);
     }
 
     private int mask(long sequence)

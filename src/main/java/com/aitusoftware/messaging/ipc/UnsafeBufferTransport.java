@@ -10,21 +10,26 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.function.Consumer;
 
-public final class UnsafeBufferTransport
+import static com.aitusoftware.messaging.ipc.Util.*;
+
+public final class UnsafeBufferTransport implements AutoCloseable
 {
-    private static final int CACHE_LINE_SIZE_IN_BYTES = 64;
-    private static final int DATA_OFFSET = CACHE_LINE_SIZE_IN_BYTES * 4;
-    private static final int MESSAGE_HEADER_LENGTH = CACHE_LINE_SIZE_IN_BYTES;
+    private static final boolean DEBUG = false;
 
     private final UnsafeBuffer data;
     private final UnsafeBuffer messageBuffer;
-    private static final int PUBLISHER_SEQUENCE_OFFSET = 8 * 7;
-    private static final int SUBSCRIBER_SEQUENCE_OFFSET = CACHE_LINE_SIZE_IN_BYTES + (8 * 7);
-    private static final boolean DEBUG = false;
     private final long mask;
     private final FileChannel channel;
     private final Path path;
+
+    // publisher state
     private long writeOffset;
+    private long nextSubscriberSequenceCheck = -1L;
+    private long nextBufferWrapSequence;
+
+    // subscriber state
+    private long lastConsumedSequence = 0L;
+    private final UnsafeBuffer receiverView = new UnsafeBuffer();
 
     public UnsafeBufferTransport(Path path, long size) throws IOException
     {
@@ -33,7 +38,6 @@ public final class UnsafeBufferTransport
                 StandardOpenOption.WRITE, StandardOpenOption.READ);
         final MappedByteBuffer data = channel.
                 map(FileChannel.MapMode.READ_WRITE, 0L, size + DATA_OFFSET + 8);
-
 
         if (Long.bitCount(size) != 1)
         {
@@ -53,70 +57,38 @@ public final class UnsafeBufferTransport
         {
             throw new IllegalArgumentException();
         }
-        nextOverrunCheck = messageBuffer.capacity();
+        nextBufferWrapSequence = messageBuffer.capacity();
     }
-
-    private long lastConsumedSequence = 0L;
-    private long writeLimit = -1L;
-    private long nextOverrunCheck;
 
     public long writeRecord(final UnsafeBuffer message)
     {
-        if (writeLimit == -1L)
-        {
-            writeLimit = getSubscriberOffset() + messageBuffer.capacity();
-        }
-        if (writeOffset + message.capacity() > writeLimit)
-        {
-            writeLimit = getSubscriberOffset() + messageBuffer.capacity();
-        }
-
-        if (writeOffset + message.capacity() > writeLimit)
-        {
-            if (DEBUG) {
-                System.out.printf("%s %s writeOffset: %d, subscriber: %d%n",
-                        path, Thread.currentThread().getName(), writeOffset, getSubscriberOffset());
-            }
-            while (writeOffset + message.capacity() > writeLimit) {
-                writeLimit = getSubscriberOffset() + messageBuffer.capacity();
-            }
-        }
-
         final int messageSize = message.capacity();
-        if (messageSize == 0)
-        {
+        if (messageSize == 0) {
             return -1;
         }
-        int paddedSize = padToCacheLine(messageSize + MESSAGE_HEADER_LENGTH);
-        /*
-        if writeOffset + paddedSize overruns buffer, claim remaining + paddedSize,
-        write -1L to header, write new entry at 0
-         */
-        boolean overflow = false;
+
+        updateSubscriberCheckOffset(messageSize);
+        waitForSlowSubscribers(messageSize);
 
 
-        writeOffset = (long) data.getAndAddLong(PUBLISHER_SEQUENCE_OFFSET,
-                paddedSize);
-        if (writeOffset + paddedSize > nextOverrunCheck) {
+        final int paddedSize = Util.padToCacheLine(messageSize + MESSAGE_HEADER_LENGTH);
+
+        writeOffset = data.getAndAddLong(PUBLISHER_SEQUENCE_OFFSET, paddedSize);
+        if (writeOffset + paddedSize > nextBufferWrapSequence) {
             if (DEBUG) {
                 System.out.printf("%s %s Buffer overrun, writing %d at %d and attempting another message%n",
                         path, Thread.currentThread().getName(), -paddedSize, mask(writeOffset));
             }
-//            paddedSize = (int) (nextOverrunCheck - writeOffset) + paddedSize;
-            nextOverrunCheck = nextOverrunCheck + messageBuffer.capacity();
+            nextBufferWrapSequence = nextBufferWrapSequence + messageBuffer.capacity();
 
-            int pointerPosition = mask(writeOffset);
+            final int forwardingPointPosition = mask(writeOffset);
             long retryResult = writeRecord(message);
-            messageBuffer.putLongOrdered(pointerPosition, (long) -paddedSize);
-            long check = messageBuffer.getLongVolatile(pointerPosition);
-            if (check != -paddedSize) {
-                System.out.printf("Check failed on overflow! %d != %d%n", -paddedSize, check);
-            }
+            messageBuffer.putLongOrdered(forwardingPointPosition, (long) -paddedSize);
             return retryResult;
         }
 
-        int actualOffset = mask(writeOffset) + MESSAGE_HEADER_LENGTH;
         int headerOffset = mask(writeOffset);
+        int actualOffset = headerOffset + MESSAGE_HEADER_LENGTH;
         try {
             if (DEBUG) {
                 System.out.printf("%s %s Writing message of %db at %d [%d]%n",
@@ -125,36 +97,25 @@ public final class UnsafeBufferTransport
             }
             messageBuffer.putBytes(actualOffset, message, 0, messageSize);
         } catch (RuntimeException e) {
-            System.out.printf("actualOffset: %d, limit: %d, capacity: %d, overflow: %s, writeOffset: %d, paddedSize: %d%n",
-                    actualOffset, messageBuffer.capacity(), messageBuffer.capacity(),
-                    overflow, writeOffset, paddedSize);
+            e.printStackTrace();
             throw e;
         }
         messageBuffer.putLongOrdered(headerOffset, (long) messageSize);
         return writeOffset;
     }
 
-    private final UnsafeBuffer receiverView = new UnsafeBuffer();
-
     public int poll(final Consumer<UnsafeBuffer> receiver)
     {
-        int messageSize = (int) ((long) messageBuffer.getLongVolatile(mask(lastConsumedSequence)));
+        int messageSize = (int) messageBuffer.getLongVolatile(mask(lastConsumedSequence));
 
-        boolean skipped = false;
         if (messageSize < 0L) {
-            long previous = this.lastConsumedSequence;
             this.lastConsumedSequence += -messageSize;
             messageSize = (int) ((long) messageBuffer.getLongVolatile(mask(this.lastConsumedSequence)));
-            if (DEBUG) {
-                System.out.printf("Read negative message size, moved seq from %d to %d, messageSize: %d%n",
-                        previous, lastConsumedSequence, messageSize);
-            }
-            skipped = true;
         }
         if (messageSize != 0)
         {
             final int newPosition = mask(lastConsumedSequence + MESSAGE_HEADER_LENGTH);
-            final int newLimit = newPosition + messageSize;
+            final int headerOffset = newPosition - MESSAGE_HEADER_LENGTH;
             if (DEBUG) {
                 System.out.printf("%s %s Read message of %db at %d [%d]%n",
                         path, Thread.currentThread().getName(),
@@ -162,14 +123,12 @@ public final class UnsafeBufferTransport
             }
             receiverView.wrap(messageBuffer, newPosition, messageSize);
             receiver.accept(receiverView);
-            receiverView.wrap(messageBuffer, newPosition - MESSAGE_HEADER_LENGTH,
-                    padToCacheLine(messageSize + MESSAGE_HEADER_LENGTH));
+            final int paddedMessageSize = Util.padToCacheLine(messageSize + MESSAGE_HEADER_LENGTH);
+            receiverView.wrap(messageBuffer, headerOffset, paddedMessageSize);
             zero(receiverView);
 
             data.putLongOrdered(SUBSCRIBER_SEQUENCE_OFFSET, lastConsumedSequence);
-            // program order should ensure the next read sees zero, unless written by the producer
-//            VIEW.set(data, newPosition - MESSAGE_HEADER_LENGTH, 0L);
-            lastConsumedSequence += padToCacheLine(messageSize + MESSAGE_HEADER_LENGTH);
+            lastConsumedSequence += paddedMessageSize;
             if (DEBUG) {
                 System.out.printf("%s %s read sequence advanced to %d%n", path,
                         Thread.currentThread().getName(), lastConsumedSequence);
@@ -177,6 +136,30 @@ public final class UnsafeBufferTransport
         }
 
         return messageSize;
+    }
+
+    private void waitForSlowSubscribers(int messageSize) {
+        if (writeOffset + messageSize > nextSubscriberSequenceCheck)
+        {
+            if (DEBUG) {
+                System.out.printf("%s %s writeOffset: %d, subscriber: %d%n",
+                        path, Thread.currentThread().getName(), writeOffset, getSubscriberOffset());
+            }
+            while (writeOffset + messageSize > nextSubscriberSequenceCheck) {
+                nextSubscriberSequenceCheck = getSubscriberOffset() + messageBuffer.capacity();
+            }
+        }
+    }
+
+    private void updateSubscriberCheckOffset(int messageSize) {
+        if (nextSubscriberSequenceCheck == -1L)
+        {
+            nextSubscriberSequenceCheck = getSubscriberOffset() + messageBuffer.capacity();
+        }
+        if (writeOffset + messageSize > nextSubscriberSequenceCheck)
+        {
+            nextSubscriberSequenceCheck = getSubscriberOffset() + messageBuffer.capacity();
+        }
     }
 
     private void zero(UnsafeBuffer buffer) {
@@ -197,21 +180,16 @@ public final class UnsafeBufferTransport
 
     private long getSubscriberOffset()
     {
-        return (long) data.getLongVolatile(SUBSCRIBER_SEQUENCE_OFFSET);
-    }
-
-    void sync() throws IOException
-    {
-        channel.force(true);
-    }
-
-    private static int padToCacheLine(int messageSize)
-    {
-        return messageSize + 64 - ((messageSize) & 63);
+        return data.getLongVolatile(SUBSCRIBER_SEQUENCE_OFFSET);
     }
 
     private int mask(long sequence)
     {
         return (int) (sequence & mask);
+    }
+
+    @Override
+    public void close() throws Exception {
+        channel.close();
     }
 }
