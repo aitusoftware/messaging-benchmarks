@@ -43,7 +43,7 @@ public final class OffHeapByteBufferTransport implements AutoCloseable
 
         if (Long.bitCount(size) != 1)
         {
-            throw new IllegalArgumentException();
+            throw new IllegalArgumentException("Buffer Size must be a power of two");
         }
 
         this.data = data.alignedSlice(8);
