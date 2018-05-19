@@ -1,5 +1,6 @@
 package com.aitusoftware.messaging.ipc;
 
+import com.aitusoftware.messaging.util.Affinity;
 import org.agrona.concurrent.UnsafeBuffer;
 
 import java.io.IOException;
@@ -93,21 +94,13 @@ public final class UnsafeBufferTransport implements AutoCloseable
 
         int headerOffset = mask(writeOffset);
         int actualOffset = headerOffset + MESSAGE_HEADER_LENGTH;
-        try
+        if (DEBUG)
         {
-            if (DEBUG)
-            {
-                System.out.printf("%s %s Writing message of %db at %d [%d]%n",
-                        path, Thread.currentThread().getName(),
-                        paddedSize, headerOffset, writeOffset);
-            }
-            messageBuffer.putBytes(actualOffset, message, 0, messageSize);
+            System.out.printf("%s %s Writing message of %db at %d [%d]%n",
+                    path, Thread.currentThread().getName(),
+                    paddedSize, headerOffset, writeOffset);
         }
-        catch (RuntimeException e)
-        {
-            e.printStackTrace();
-            throw e;
-        }
+        messageBuffer.putBytes(actualOffset, message, 0, messageSize);
         messageBuffer.putLongOrdered(headerOffset, (long) messageSize);
         return writeOffset;
     }

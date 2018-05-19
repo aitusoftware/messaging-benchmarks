@@ -98,22 +98,14 @@ public final class OffHeapByteBufferTransport implements AutoCloseable
 
         int headerOffset = mask(writeOffset);
         int actualOffset = headerOffset + Util.MESSAGE_HEADER_LENGTH;
-        try
+        if (DEBUG)
         {
-            if (DEBUG)
-            {
-                System.out.printf("%s %s Writing message of %db at %d [%d]%n",
-                        path, Thread.currentThread().getName(),
-                        paddedSize, headerOffset, writeOffset);
-            }
-            messageBuffer.position(actualOffset);
-            messageBuffer.put(message);
+            System.out.printf("%s %s Writing message of %db at %d [%d]%n",
+                    path, Thread.currentThread().getName(),
+                    paddedSize, headerOffset, writeOffset);
         }
-        catch (RuntimeException e)
-        {
-            e.printStackTrace();
-            throw e;
-        }
+        messageBuffer.position(actualOffset);
+        messageBuffer.put(message);
         VIEW.setRelease(messageBuffer, headerOffset, (long) messageSize);
         return writeOffset;
     }
