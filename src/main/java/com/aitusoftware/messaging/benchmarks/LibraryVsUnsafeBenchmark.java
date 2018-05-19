@@ -61,6 +61,7 @@ public class LibraryVsUnsafeBenchmark
     @Setup(Level.Trial)
     public void setup()
     {
+        AffinityUtil.set();
         atomic.setVolatile(values[0]);
         updater.setVolatile(values[0]);
         unsafe.setVolatile(values[0]);

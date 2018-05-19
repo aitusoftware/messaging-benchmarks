@@ -12,9 +12,9 @@ import java.util.concurrent.TimeUnit;
 
 @Measurement(iterations = 10)
 @Warmup(iterations = 10)
-@OutputTimeUnit(TimeUnit.SECONDS)
-@BenchmarkMode(Mode.Throughput)
-@Fork(value = 1, jvmArgs = "-Dipc.disable.subscriberGate=true")
+@OutputTimeUnit(TimeUnit.MICROSECONDS)
+@BenchmarkMode({Mode.Throughput, Mode.AverageTime})
+@Fork(value = 2)
 @State(Scope.Benchmark)
 public class VarHandleIpcBenchmark
 {
@@ -27,7 +27,7 @@ public class VarHandleIpcBenchmark
     @Setup
     public void setup() throws IOException
     {
-        System.setProperty(OffHeapByteBufferTransport.IPC_DISABLE_SUBSCRIBER_GATE, "true");
+        AffinityUtil.set();
         int messageSize = MESSAGE_SIZE;
         Path ipcFileIn = Paths.get("/dev/shm/ipc-in");
         if (Files.exists(ipcFileIn))

@@ -35,6 +35,7 @@ public class DataCopyBenchmark {
 
     @Setup
     public void setup() {
+        AffinityUtil.set();
         source = ByteBuffer.allocateDirect(payloadSize);
         for (int i = 0; i < payloadSize / 8; i += 8) {
             source.putLong(i / 8, (byte) i);

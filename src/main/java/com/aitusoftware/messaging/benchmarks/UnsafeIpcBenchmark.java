@@ -14,10 +14,9 @@ import java.util.concurrent.TimeUnit;
 
 @Measurement(iterations = 10)
 @Warmup(iterations = 10)
-@OutputTimeUnit(TimeUnit.SECONDS)
-@BenchmarkMode(Mode.Throughput)
-//@Fork(value = 1, jvmArgs = "-Dipc.disable.subscriberGate=true -Dagrona.disable.bounds.checks=true")
-@Fork(value = 1, jvmArgs = "-Dipc.disable.subscriberGate=true")
+@OutputTimeUnit(TimeUnit.MICROSECONDS)
+@BenchmarkMode({Mode.Throughput, Mode.AverageTime})
+@Fork(value = 2)
 @State(Scope.Benchmark)
 public class UnsafeIpcBenchmark
 {
@@ -30,6 +29,7 @@ public class UnsafeIpcBenchmark
     @Setup
     public void setup() throws IOException
     {
+        AffinityUtil.set();
         System.setProperty(OffHeapByteBufferTransport.IPC_DISABLE_SUBSCRIBER_GATE, "true");
         int messageSize = MESSAGE_SIZE;
         Path ipcFileIn = Paths.get("/dev/shm/ipc-in");

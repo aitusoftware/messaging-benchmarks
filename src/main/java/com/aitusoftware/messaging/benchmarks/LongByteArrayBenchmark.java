@@ -59,9 +59,10 @@ public class LongByteArrayBenchmark
     private final UnsafeBuffer agronaBuffer = new UnsafeBuffer(ByteBuffer.allocateDirect(4096));
     private int counter;
 
-    @Setup(Level.Trial)
+    @Setup
     public void setup()
     {
+        AffinityUtil.set();
         LONG_ARRAY_VIEW
                 .compareAndExchange(nativeBuffer, BUFFER_OFFSET, 0, values[0]);
         LONG_ARRAY_VIEW
