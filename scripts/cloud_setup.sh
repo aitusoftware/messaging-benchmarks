@@ -3,11 +3,10 @@ set -euxo pipefail
 sudo apt update
 sudo apt install -y cpuset openjdk-10-jdk-headless git hwloc unzip
 
-cd
 
 lstopo-no-graphics --of xml -v topo.xml
 
-git clone https://github.com/aitusoftware/messaging-benchmarks.git
+#git clone https://github.com/aitusoftware/messaging-benchmarks.git
 
 export OVERRIDE_IRQ_CPUS=3,4,5,21,22,23
 export OVERRIDE_RESTRICTED_CPUS=11,12,13,14,15,16,17,29,30,31,32,33,34,35
