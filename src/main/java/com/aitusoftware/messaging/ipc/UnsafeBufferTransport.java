@@ -1,6 +1,5 @@
 package com.aitusoftware.messaging.ipc;
 
-import com.aitusoftware.messaging.util.Affinity;
 import org.agrona.concurrent.UnsafeBuffer;
 
 import java.io.IOException;
@@ -11,7 +10,11 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.function.Consumer;
 
-import static com.aitusoftware.messaging.ipc.Util.*;
+import static com.aitusoftware.messaging.ipc.Util.CACHE_LINE_SIZE_IN_BYTES;
+import static com.aitusoftware.messaging.ipc.Util.DATA_OFFSET;
+import static com.aitusoftware.messaging.ipc.Util.MESSAGE_HEADER_LENGTH;
+import static com.aitusoftware.messaging.ipc.Util.PUBLISHER_SEQUENCE_OFFSET;
+import static com.aitusoftware.messaging.ipc.Util.SUBSCRIBER_SEQUENCE_OFFSET;
 
 public final class UnsafeBufferTransport implements AutoCloseable
 {

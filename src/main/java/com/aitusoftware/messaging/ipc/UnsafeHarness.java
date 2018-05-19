@@ -21,6 +21,8 @@ public final class UnsafeHarness
     private static final long MAX_VALUE = TimeUnit.MILLISECONDS.toNanos(5L);
     private static final int BUFFER_SIZE = Integer.getInteger("ipc.bufferSize", MESSAGE_COUNT / 8);
     private static final int MESSAGE_SIZE = Integer.getInteger("ipc.msgSize", 256);
+    private static final long DELAY_NS = Long.getLong("ipc.pub.delayNs", 0);
+    private static final boolean SHOULD_DELAY = DELAY_NS != 0;
 
     private final UnsafeBufferTransport clientPublisher;
     private final UnsafeBufferTransport clientSubscriber;
@@ -99,7 +101,8 @@ public final class UnsafeHarness
             for (int i = 0; i < MESSAGE_COUNT; i++)
             {
                 message.putLong(sequenceOffset, sequence++);
-                message.putLong(0, System.nanoTime());
+                final long publishNanos = System.nanoTime();
+                message.putLong(0, publishNanos);
                 try
                 {
                     clientPublisher.writeRecord(message);
@@ -110,8 +113,21 @@ public final class UnsafeHarness
                     return;
                 }
 
+                if (SHOULD_DELAY)
+                {
+                    final long waitUntil = publishNanos + DELAY_NS;
+                    while (System.nanoTime() < waitUntil)
+                    {
+                        // spin
+                    }
+                }
             }
-            LockSupport.parkNanos(TimeUnit.SECONDS.toNanos(5L));
+
+            final long spinUntil = System.nanoTime() + TimeUnit.SECONDS.toNanos(5L);
+            while (System.nanoTime() < spinUntil)
+            {
+                // spin
+            }
         }
     }
 
@@ -128,7 +144,14 @@ public final class UnsafeHarness
     private void receiveMessage(UnsafeBuffer message)
     {
         long rttNanos = System.nanoTime() - message.getLong(0);
-        histogram.recordValue(Math.min(MAX_VALUE, rttNanos));
+        if (SHOULD_DELAY)
+        {
+            histogram.recordValueWithExpectedInterval(Math.min(MAX_VALUE, rttNanos), DELAY_NS);
+        }
+        else
+        {
+            histogram.recordValue(Math.min(MAX_VALUE, rttNanos));
+        }
         if (histogram.getTotalCount() == MESSAGE_COUNT)
         {
             try (PrintStream output = new PrintStream(
