@@ -12,7 +12,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.concurrent.*;
-import java.util.concurrent.locks.LockSupport;
 import java.util.function.Consumer;
 
 public final class UnsafeHarness
@@ -34,7 +33,7 @@ public final class UnsafeHarness
     private final Consumer<UnsafeBuffer> echoMessage = this::echoMessage;
     private final Consumer<UnsafeBuffer> receiveMessage = this::receiveMessage;
     private long sequence;
-    private long expectedSequence;
+    private long messageCount;
 
     public static void main(String[] args) throws IOException
     {
@@ -144,6 +143,7 @@ public final class UnsafeHarness
     private void receiveMessage(UnsafeBuffer message)
     {
         long rttNanos = System.nanoTime() - message.getLong(0);
+        messageCount++;
         if (SHOULD_DELAY)
         {
             histogram.recordValueWithExpectedInterval(Math.min(MAX_VALUE, rttNanos), DELAY_NS);
@@ -152,7 +152,7 @@ public final class UnsafeHarness
         {
             histogram.recordValue(Math.min(MAX_VALUE, rttNanos));
         }
-        if (histogram.getTotalCount() == MESSAGE_COUNT)
+        if (messageCount == MESSAGE_COUNT)
         {
             try (PrintStream output = new PrintStream(
                     new FileOutputStream("/tmp/unsafe-" + System.currentTimeMillis() + ".hgram", false)))
@@ -164,14 +164,7 @@ public final class UnsafeHarness
                 e.printStackTrace();
             }
             histogram.reset();
+            messageCount = 0;
         }
-        if (message.getLong(sequenceOffset) != expectedSequence)
-        {
-            System.err.printf("Expected sequence %d, but was %d",
-                    expectedSequence, sequenceOffset);
-            throw new RuntimeException(String.format("Expected sequence %d, but was %d",
-                    expectedSequence, sequenceOffset));
-        }
-        expectedSequence++;
     }
 }

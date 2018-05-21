@@ -13,13 +13,12 @@ import java.nio.file.Paths;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.locks.LockSupport;
 import java.util.function.Consumer;
 
 public final class Harness
 {
     private static final int MESSAGE_COUNT = Integer.getInteger("ipc.msgCount", 1 << 20);
-    private static final long MAX_VALUE = TimeUnit.MILLISECONDS.toNanos(5L);
+    private static final long MAX_VALUE = TimeUnit.MILLISECONDS.toNanos(50L);
     private static final int BUFFER_SIZE = Integer.getInteger("ipc.bufferSize", MESSAGE_COUNT / 8);
     private static final int MESSAGE_SIZE = Integer.getInteger("ipc.msgSize", 256);
     private static final long DELAY_NS = Long.getLong("ipc.pub.delayNs", 0);
@@ -35,7 +34,7 @@ public final class Harness
     private final Consumer<ByteBuffer> receiveMessage = this::receiveMessage;
     private final Consumer<ByteBuffer> echoMessage = this::echoMessage;
     private long sequence;
-    private long expectedSequence;
+    private long messageCount;
 
     public static void main(String[] args) throws IOException
     {
@@ -105,7 +104,15 @@ public final class Harness
                 message.putLong(sequenceOffset, sequence++);
                 final long publishNanos = System.nanoTime();
                 message.putLong(0, publishNanos);
-                clientPublisher.writeRecord(message);
+                try
+                {
+                    clientPublisher.writeRecord(message);
+                }
+                catch (Throwable t)
+                {
+                    t.printStackTrace();
+                    return;
+                }
 
                 if (SHOULD_DELAY)
                 {
@@ -139,6 +146,7 @@ public final class Harness
     private void receiveMessage(ByteBuffer message)
     {
         long rttNanos = System.nanoTime() - message.getLong(message.position());
+        messageCount++;
         if (SHOULD_DELAY)
         {
             histogram.recordValueWithExpectedInterval(Math.min(MAX_VALUE, rttNanos), DELAY_NS);
@@ -147,7 +155,7 @@ public final class Harness
         {
             histogram.recordValue(Math.min(MAX_VALUE, rttNanos));
         }
-        if (histogram.getTotalCount() == MESSAGE_COUNT)
+        if (messageCount == MESSAGE_COUNT)
         {
             try (PrintStream output = new PrintStream(
                     new FileOutputStream("/tmp/vh-" + System.currentTimeMillis() + ".hgram", false)))
@@ -159,14 +167,7 @@ public final class Harness
                 e.printStackTrace();
             }
             histogram.reset();
+            messageCount = 0;
         }
-        if (message.getLong(message.position() + sequenceOffset) != expectedSequence)
-        {
-            System.err.printf("Expected sequence %d, but was %d",
-                    expectedSequence, sequenceOffset);
-            throw new RuntimeException(String.format("Expected sequence %d, but was %d",
-                    expectedSequence, sequenceOffset));
-        }
-        expectedSequence++;
     }
 }

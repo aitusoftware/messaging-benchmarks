@@ -24,3 +24,5 @@ bash ./mask_cpus.sh
 
 bash ./cpuset_wrapper.sh ../uthrottled.bash
 #bash ./cpuset_wrapper.sh ../vthrottled.bash
+
+echo 60 > /proc/sys/vm/stat_interval
